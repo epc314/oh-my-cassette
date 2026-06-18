@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Runtime outputs
+downloads/
+metadata/
+cache/
+exports/
+jobs/
+logs/
+*.part
+*.log
+
+# Local tooling / agent files
+AGENTS.md
+.serena/
+.codex/
+cassette_hermes_codex_development_plan.md
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

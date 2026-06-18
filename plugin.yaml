@@ -1,0 +1,22 @@
+name: cassette
+version: 0.1.0
+description: Cassette video-editing automation for QQ/Telegram gateway media ingestion, manifest generation, prompt preparation, and browser-driven Cassette jobs.
+author: Oh My Cassette contributors
+provides_tools:
+  - cassette_ingest_media
+  - cassette_list_assets
+  - cassette_make_prompt
+  - cassette_match_bgm
+  - cassette_match_exact_bgm
+  - jamendo_music_matcher
+  - cassette_answer_question
+  - cassette_run_job
+  - cassette_job_status
+  - cassette_review_completion
+  - cassette_cancel_job
+provides_hooks:
+  - pre_gateway_dispatch
+  - pre_llm_call
+  - post_tool_call
+  - on_session_finalize
+  - on_session_reset
