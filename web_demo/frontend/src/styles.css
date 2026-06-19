@@ -2,7 +2,6 @@
    Tokens mirror DESIGN.md: cool near-black room, amber reserved for state,
    coral→lemon spectrum reserved for the AI presence. */
 :root {
-  /* Surfaces — cool-neutral ramp, stepped by role */
   --grade-black: #07080b;
   --panel: #101216;
   --surface: #14151a;
@@ -10,51 +9,44 @@
   --hairline: #2a2b32;
   --hairline-strong: #3a3b44;
 
-  /* Ink */
   --ink: #f7f7f8;
   --ink-secondary: #b3b5bd;
   --ink-muted: #888a96;
   --ink-faint: #61626b;
 
-  /* State accent — amber, used only where something is live */
   --amber: #f49325;
   --amber-soft: rgba(244, 147, 37, 0.14);
 
-  /* AI presence spectrum — only the agent ring */
   --coral: #f94639;
   --coral-glow: #fa665c;
   --peach: #fd916d;
   --sand: #febe85;
   --lemon: #fbe774;
 
-  /* Semantic */
   --destructive: #dc2828;
   --success: #20c55d;
   --warning: #f59f0a;
   --info: #3c83f6;
   --cyan: #17cce8;
 
-  /* Radius */
   --r-sm: 4px;
   --r-md: 8px;
   --r-lg: 12px;
   --r-full: 9999px;
 
-  /* Type */
   --font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* Motion */
   --dur: 160ms;
   --dur-slow: 240ms;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
 
-  /* Elevation */
   --shadow-lg: 0 10px 24px -6px rgb(0 0 0 / 0.55), 0 4px 8px -4px rgb(0 0 0 / 0.4);
 
-  /* z-index scale */
   --z-banner: 20;
   --z-dropzone: 30;
+  --z-drawer-backdrop: 39;
+  --z-drawer: 40;
   --z-dialog: 50;
 }
 
@@ -89,7 +81,6 @@ body {
   font-feature-settings: "tnum" 1;
 }
 
-/* ---- Buttons (secondary/outline default; primary + active are explicit) ---- */
 button,
 textarea,
 input {
@@ -129,7 +120,6 @@ button .icon {
   flex: 0 0 auto;
 }
 
-/* Global focus — the brand's 2px amber ring with 2px offset */
 :focus-visible {
   outline: 2px solid var(--amber);
   outline-offset: 2px;
@@ -153,8 +143,8 @@ a:hover {
   grid-template-rows: auto auto 1fr;
 }
 /* Explicit placement so the workspace always owns the 1fr track, even when the
-   connection banner is display:none (otherwise children auto-place into the two
-   auto tracks and the 1fr track is left empty — a blank void below the fold). */
+   connection banner is absent (otherwise the remaining children auto-place into
+   the auto tracks and leave the 1fr track empty — a blank void below the fold). */
 .connection-banner {
   grid-row: 1;
 }
@@ -176,9 +166,6 @@ a:hover {
   background: var(--surface);
   color: var(--ink-secondary);
   z-index: var(--z-banner);
-}
-.connection-banner[hidden] {
-  display: none;
 }
 .connection-banner.is-connecting::before {
   content: "";
@@ -259,6 +246,8 @@ a:hover {
 .topbar-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -274,17 +263,23 @@ a:hover {
   border: 0;
   border-radius: 0;
   color: var(--ink-muted);
+  font-weight: 500;
 }
 .language-toggle button + button {
   border-left: 1px solid var(--hairline);
 }
+/* Active state uses colour only — no weight change, so the glyph width (and the
+   toggle) never shifts when the active segment changes. */
 .language-toggle button.active {
   color: var(--grade-black);
   background: var(--amber);
-  font-weight: 600;
 }
 .language-toggle button.active:hover {
   background: var(--amber);
+}
+
+.status-toggle {
+  display: none;
 }
 
 /* ---- Workspace ---- */
@@ -301,6 +296,7 @@ a:hover {
   min-height: 0;
   display: grid;
   grid-template-rows: 1fr auto;
+  container-type: inline-size;
 }
 
 .messages {
@@ -314,7 +310,7 @@ a:hover {
 }
 
 .message {
-  max-width: min(720px, 86%);
+  max-width: min(720px, 86cqi);
   border: 1px solid var(--hairline);
   border-radius: var(--r-lg);
   padding: 11px 14px;
@@ -354,7 +350,6 @@ a:hover {
   font-size: 0.8125rem;
 }
 
-/* AI presence — the agent ring around a pending reply */
 .message.thinking {
   padding: 14px 16px;
   box-shadow: 0 0 18px rgba(250, 102, 92, 0.16);
@@ -452,9 +447,11 @@ a:hover {
 }
 #uploadBtn {
   grid-area: upload;
+  min-width: 6rem;
 }
 #sendBtn {
   grid-area: send;
+  min-width: 6rem;
   border-color: var(--ink);
   background: var(--ink);
   color: var(--grade-black);
@@ -489,7 +486,6 @@ a:hover {
   opacity: 1;
 }
 
-/* Drag-and-drop overlay */
 .drop-hint {
   position: absolute;
   inset: 12px;
@@ -509,7 +505,7 @@ a:hover {
   display: flex;
 }
 
-/* ---- Side pane ---- */
+/* ---- Side pane / status drawer ---- */
 .side-pane {
   min-height: 0;
   min-width: 0;
@@ -521,6 +517,13 @@ a:hover {
   flex-direction: column;
   gap: 22px;
 }
+.drawer-close {
+  display: none;
+}
+.drawer-backdrop {
+  display: none;
+}
+
 .section-title {
   display: flex;
   align-items: center;
@@ -539,6 +542,7 @@ a:hover {
 }
 .section-title button {
   flex: 0 0 auto;
+  min-width: 4.5rem;
   min-height: 30px;
   padding: 0 11px;
   font-size: 0.8125rem;
@@ -596,7 +600,6 @@ a:hover {
   font-weight: 600;
 }
 
-/* Status badges — color + word, never color alone */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -735,6 +738,14 @@ dialog::backdrop {
     opacity: 1;
   }
 }
+@keyframes drawer-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -747,55 +758,42 @@ dialog::backdrop {
   }
 }
 
-/* ---- Responsive ---- */
-@media (max-width: 860px) {
-  body {
-    position: relative;
+/* Desktop: reserve the wider (English) label so the top-bar controls keep a
+   constant size when the locale switches — no reflow, no jiggle. */
+@media (min-width: 861px) {
+  .topbar-actions > button {
+    min-width: 5.5rem;
   }
+}
+
+/* ---- Responsive: phone — chat full-height, status as a bottom-sheet drawer ---- */
+@media (max-width: 860px) {
   .topbar {
     min-height: 0;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
+    padding: max(10px, env(safe-area-inset-top)) 14px 10px;
     gap: 10px;
-    padding: max(12px, env(safe-area-inset-top)) 14px 10px;
+  }
+  .topbar h1 {
+    font-size: 1.15rem;
   }
   .topbar-actions {
-    width: 100%;
-    min-width: 0;
-    display: grid;
-    grid-template-columns: auto minmax(72px, 1fr) minmax(72px, 1fr);
-    gap: 8px;
+    gap: 6px;
   }
   .topbar-actions > button {
-    min-width: 0;
-    padding: 0 10px;
+    padding: 0 11px;
   }
-  .language-toggle {
-    align-self: stretch;
-    min-width: 0;
+  .status-toggle {
+    display: inline-flex;
   }
-  .language-toggle button {
-    min-width: 40px;
-    padding: 0 10px;
-  }
+
   .workspace {
-    min-height: 0;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) auto;
   }
-  .side-pane {
-    border-left: 0;
-    border-top: 1px solid var(--hairline);
-    max-height: 38dvh;
-    padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
-  }
+
   .messages {
     padding: 14px;
   }
-  .message {
-    max-width: 100%;
-  }
+
   .composer {
     grid-template-columns: minmax(74px, auto) minmax(0, 1fr);
     grid-template-areas:
@@ -813,36 +811,66 @@ dialog::backdrop {
   .settings input {
     font-size: 16px;
   }
-  .command-chips button {
-    font-size: 0.8125rem;
+
+  .drawer-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-drawer-backdrop);
+    background: rgba(4, 5, 7, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur) ease;
+  }
+  .drawer-backdrop.show {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .side-pane {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--z-drawer);
+    max-height: 82dvh;
+    border-left: 0;
+    border-top: 1px solid var(--hairline);
+    border-top-left-radius: var(--r-lg);
+    border-top-right-radius: var(--r-lg);
+    box-shadow: var(--shadow-lg);
+    padding: 16px 16px calc(18px + env(safe-area-inset-bottom));
+    transform: translateY(100%);
+    transition: transform var(--dur-slow) var(--ease);
+  }
+  .side-pane.open {
+    transform: translateY(0);
+  }
+  .side-pane::before {
+    content: "";
+    display: block;
+    width: 36px;
+    height: 4px;
+    border-radius: var(--r-full);
+    background: var(--hairline-strong);
+    margin: 0 auto 14px;
+  }
+  .drawer-close {
+    display: inline-flex;
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    min-height: 32px;
+    width: 32px;
+    padding: 0;
+    border-radius: var(--r-full);
+    color: var(--ink-secondary);
   }
 }
 
-@media (max-width: 420px) {
-  .topbar h1 {
-    font-size: 1.2rem;
-  }
+@media (max-width: 380px) {
   .topbar-actions {
-    grid-template-columns: auto minmax(62px, 1fr) minmax(62px, 1fr);
-    gap: 6px;
-  }
-  .topbar-actions > button,
-  .language-toggle button {
-    min-height: 38px;
-    padding: 0 9px;
-  }
-  .language-toggle button {
-    min-width: 38px;
-  }
-}
-
-@media (max-width: 340px) {
-  .topbar-actions {
-    grid-template-columns: 1fr 1fr;
-  }
-  .language-toggle {
-    grid-column: 1 / -1;
-    width: max-content;
-    justify-self: start;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 }
