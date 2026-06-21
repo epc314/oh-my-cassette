@@ -49,6 +49,10 @@ class BrowserAuthError(RuntimeError):
         self.code = code
 
 
+DEFAULT_CHAT_SELECTOR = "[data-testid^='chat-input-textarea-'],textarea[placeholder*='Describe'],textarea"
+DEFAULT_SEND_SELECTOR = "[data-testid^='chat-input-send-'],button[type='submit']"
+
+
 _PLAYWRIGHT: Any = None
 _PLAYWRIGHT_THREAD_ID: int | None = None
 _BROWSER_SESSIONS: dict[str, dict[str, Any]] = {}
@@ -798,6 +802,7 @@ def _selector_visible_variants(selector: str) -> list[str]:
 def _chat_input_candidates(selector: str) -> list[str]:
     candidates = _selector_visible_variants(selector)
     candidates.extend([
+        "[data-testid^='chat-input-textarea-']:visible",
         "[data-testid='agent-chat-input']:visible",
         "[data-testid='chat-input']:visible",
         "textarea[placeholder*='Describe']:visible",
@@ -821,6 +826,7 @@ def _set_chat_input_with_js(page: Any, prompt: str) -> bool:
         return bool(page.evaluate(
             """(value) => {
                 const selectors = [
+                    "[data-testid^='chat-input-textarea-']",
                     "[data-testid='agent-chat-input']",
                     "[data-testid='chat-input']",
                     "textarea[placeholder*='Describe']",
@@ -1611,6 +1617,94 @@ def _upload_status_text(page: Any) -> str:
         return ""
 
 
+def _int_upload_value(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return None
+
+
+def _bool_upload_value(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "active"}:
+        return True
+    if normalized in {"0", "false", "no", "ready", "failed", "empty"}:
+        return False
+    return None
+
+
+def _normalize_upload_state(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    total = _int_upload_value(raw.get("total"))
+    ready = _int_upload_value(raw.get("completed"))
+    if ready is None:
+        ready = _int_upload_value(raw.get("ready"))
+    failed = _int_upload_value(raw.get("failed"))
+    active_count = _int_upload_value(raw.get("active"))
+    active = _bool_upload_value(raw.get("isActive"))
+    if active is None:
+        active = active_count > 0 if active_count is not None else _bool_upload_value(raw.get("status"))
+    if total is None and ready is None and failed is None and active is None:
+        return None
+    status_text = str(raw.get("statusText") or raw.get("text") or raw.get("status") or "").strip()
+    return {
+        "source": str(raw.get("source") or "unknown"),
+        "total": total,
+        "ready": ready,
+        "failed": failed,
+        "active": active,
+        "status_text": status_text,
+    }
+
+
+def _structured_upload_state(page: Any) -> dict[str, Any] | None:
+    try:
+        raw = page.evaluate(
+            """() => {
+                const textOf = (el) => ((el && (el.innerText || el.textContent)) || '').replace(/\\s+/g, ' ').trim();
+                const root = document.querySelector("[data-testid='agent-upload-strip']");
+                if (root && root.dataset && root.dataset.cassetteUploadTotal !== undefined) {
+                    return {
+                        source: "upload-strip",
+                        total: root.dataset.cassetteUploadTotal,
+                        completed: root.dataset.cassetteUploadCompleted,
+                        failed: root.dataset.cassetteUploadFailed,
+                        active: root.dataset.cassetteUploadActive,
+                        status: root.dataset.cassetteUploadState,
+                        statusText: textOf(document.querySelector("[data-testid='agent-upload-status']")),
+                    };
+                }
+                const bridge = window.__CASSETTE_E2E__;
+                if (bridge && typeof bridge.getUploadState === "function") {
+                    try {
+                        const state = bridge.getUploadState();
+                        if (state && typeof state === "object") return {...state, source: "bridge"};
+                    } catch (_) {}
+                }
+                const progress = document.querySelector("[data-testid='agent-upload-progress']");
+                if (progress) {
+                    return {
+                        source: "progressbar",
+                        total: progress.getAttribute("aria-valuemax"),
+                        completed: progress.getAttribute("aria-valuenow"),
+                        statusText: textOf(document.querySelector("[data-testid='agent-upload-status']")),
+                    };
+                }
+                return null;
+            }"""
+        )
+    except Exception:
+        return None
+    return _normalize_upload_state(raw)
+
+
 def _upload_timeout_sec(job: dict) -> int | None:
     raw = os.getenv("CASSETTE_UPLOAD_TIMEOUT_SEC")
     if raw:
@@ -1623,7 +1717,7 @@ def _upload_timeout_sec(job: dict) -> int | None:
 
 
 _UPLOAD_PROCESSING_TERMS = (
-    "uploading", "processing", "analyzing", "transcoding",
+    "uploading", "processing", "analyzing", "transcoding", "active", "queued", "indexing",
     "上传中", "处理中", "分析中", "传输中", "转码中", "进行中",
 )
 
@@ -1670,32 +1764,56 @@ def _upload_status_has_failure(text: str) -> bool:
 
 
 def _upload_status_ready_for_expected(text: str, expected_count: int) -> bool:
-    del expected_count
+    if expected_count <= 0:
+        return False
     ready, failed = _upload_status_counts(text)
     if failed not in {None, 0}:
         return False
     if _upload_status_has_processing(text):
         return False
     if ready is not None:
-        return ready > 0
-    value = (text or "").lower()
-    if any(term in value for term in ("ready", "就绪", "准备就绪")):
-        return not _upload_status_has_failure(value)
+        return ready >= expected_count
+    return False
+
+
+def _structured_upload_has_failure(state: dict[str, Any]) -> bool:
+    failed = state.get("failed")
+    if isinstance(failed, int):
+        return failed > 0
+    return _upload_status_has_failure(str(state.get("status_text") or ""))
+
+
+def _structured_upload_ready_for_expected(state: dict[str, Any], expected_count: int) -> bool:
+    if expected_count <= 0:
+        return False
+    if _structured_upload_has_failure(state):
+        return False
+    if state.get("active") is True:
+        return False
+    total = state.get("total")
+    ready = state.get("ready")
+    if isinstance(total, int) and total < expected_count:
+        return False
+    if isinstance(ready, int):
+        return ready >= expected_count
     return False
 
 
 def _agent_page_has_ready_assets(page: Any, expected_count: int) -> bool:
     if expected_count <= 0:
         return False
+    structured = _structured_upload_state(page)
+    if structured is not None:
+        return _structured_upload_ready_for_expected(structured, expected_count)
     try:
         status = _upload_status_text(page)
-        body = page.locator("body").inner_text(timeout=500)
     except Exception:
         return False
-    value = status or body
-    if _upload_status_has_failure(value):
+    if not status:
         return False
-    return _upload_status_ready_for_expected(value, expected_count)
+    if _upload_status_has_failure(status):
+        return False
+    return _upload_status_ready_for_expected(status, expected_count)
 
 
 def _wait_for_agent_upload_ready(page: Any, job_id: str, expected_count: int, timeout_sec: int | None = None) -> str:
@@ -1707,9 +1825,15 @@ def _wait_for_agent_upload_ready(page: Any, job_id: str, expected_count: int, ti
             return last_body
         body = page.locator("body").inner_text(timeout=1000)
         last_body = body
+        structured = _structured_upload_state(page)
         status = _upload_status_text(page)
-        body_lower = body.lower()
-        if status:
+        status_or_state = str((structured or {}).get("status_text") or status)
+        if structured is not None:
+            if _structured_upload_has_failure(structured):
+                raise RuntimeError(f"Cassette asset upload/analysis failed: {status_or_state or structured}")
+            if _structured_upload_ready_for_expected(structured, expected_count):
+                return body
+        elif status:
             if _upload_status_has_failure(status):
                 raise RuntimeError(f"Cassette asset upload/analysis failed: {status}")
             if _upload_status_ready_for_expected(status, expected_count):
@@ -1718,14 +1842,12 @@ def _wait_for_agent_upload_ready(page: Any, job_id: str, expected_count: int, ti
         if now - last_progress_at >= int(os.getenv("CASSETTE_PROGRESS_INTERVAL_SEC", "30")):
             _record_stage_progress(
                 job_id,
-                status or body,
+                status_or_state or body,
                 [],
                 stage="upload",
                 stage_elapsed_sec=now - start,
             )
             last_progress_at = now
-        if not status and not _upload_status_has_processing(body_lower):
-            return body
         time.sleep(1)
     raise RuntimeError("Timed out waiting for Cassette asset upload/analysis")
 
@@ -2055,6 +2177,7 @@ def _click_chat_send_control_with_js(page: Any) -> bool:
         return bool(page.evaluate(
             """() => {
                 const inputSelectors = [
+                    "[data-testid^='chat-input-textarea-']",
                     "[data-testid='agent-chat-input']",
                     "[data-testid='chat-input']",
                     "textarea[placeholder*='Describe']",
@@ -2130,6 +2253,7 @@ def _click_chat_send_control_with_js(page: Any) -> bool:
 def _click_chat_send_control(page: Any, send_selector: str) -> None:
     selectors = _selector_visible_variants(send_selector)
     selectors.extend([
+        "[data-testid^='chat-input-send-']:visible",
         "[data-testid='agent-send-button']:visible",
         "[data-testid='chat-send-button']:visible",
         "button[aria-label*='Send']:visible",
@@ -2999,8 +3123,8 @@ def run_cassette_browser_job(job: dict) -> dict:
     url = _normalize_cassette_url(job.get("url") or _runtime_env("CASSETTE_URL") or "https://sg.trycassette.online/agent")
     headless = os.getenv("CASSETTE_HEADLESS", "true").lower() not in {"0", "false", "no"}
     upload_selector = _selector(job, "upload", "CASSETTE_UPLOAD_SELECTOR", "[data-testid='agent-file-input']")
-    chat_selector = _selector(job, "chat", "CASSETTE_CHAT_SELECTOR", "textarea[placeholder*='Describe'], textarea")
-    send_selector = _selector(job, "send", "CASSETTE_SEND_SELECTOR", "button[type='submit']")
+    chat_selector = _selector(job, "chat", "CASSETTE_CHAT_SELECTOR", DEFAULT_CHAT_SELECTOR)
+    send_selector = _selector(job, "send", "CASSETTE_SEND_SELECTOR", DEFAULT_SEND_SELECTOR)
     done_selector = _selector(job, "done", "CASSETTE_DONE_SELECTOR", "[data-testid='job-done']")
     output_selector = _selector(job, "output", "CASSETTE_OUTPUT_SELECTOR", "[data-testid='export-link'],[data-testid='download-link'],a[href]")
     errors: list[dict] = []
