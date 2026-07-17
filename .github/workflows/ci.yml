@@ -151,7 +151,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-mcp.lock
       - name: Install local MCP test dependencies
-        run: python -m pip install -r requirements-mcp.lock pytest
+        run: python -m pip install -r requirements-mcp.lock pytest pyyaml
       - name: Run host-neutral MCP tests
         run: >-
           python -m pytest -q
@@ -207,7 +207,9 @@ jobs:
           grep -F 'oh-my-cassette@cassette-editor' "$smoke_root/codex-list.txt"
           grep -F 'installed, enabled' "$smoke_root/codex-list.txt"
           expected_version="$(jq -r .version .codex-plugin/plugin.json)"
-          installed_manifest="$smoke_root/codex-home/plugins/cache/cassette-editor/oh-my-cassette/local/.codex-plugin/plugin.json"
+          installed_manifest="$(find "$smoke_root/codex-home/plugins/cache/cassette-editor/oh-my-cassette" \
+            -path '*/.codex-plugin/plugin.json' -print -quit)"
+          test -n "$installed_manifest"
           test "$(jq -r .version "$installed_manifest")" = "$expected_version"
       - name: Smoke-install with Claude CLI
         run: |
