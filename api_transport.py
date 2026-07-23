@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -247,9 +248,26 @@ def _http_timeout() -> float:
     return _env_num("CASSETTE_API_HTTP_TIMEOUT_SEC", 60.0, 5.0)
 
 
+def _stream_enabled() -> bool:
+    # SSE event listener (timeline deltas + plan progress). Default on; CASSETTE_API_STREAM=0
+    # restores a pure-poll transport. Status polling stays the run driver either way — the
+    # stream is the event channel, never the completion signal.
+    return _env("CASSETTE_API_STREAM").lower() not in {"0", "false", "no", "off"}
+
+
+def _stream_read_timeout() -> float:
+    return _env_num("CASSETTE_API_STREAM_TIMEOUT_SEC", 900.0, 30.0)
+
+
+# Stream modes requested for every run so a later join (plugin listener OR the user's /try tab)
+# replays commit/plan events; 'custom' carries ProjectCommitEvents, 'updates' the node progress.
+_RUN_STREAM_MODES = ["updates", "custom"]
+
+
 class ApiTransport:
     def __init__(self) -> None:
         self._token: str | None = None
+        self._active_stream_stop: threading.Event | None = None
         # Progress state (reset per run in _init_progress; defaults keep helpers safe on the export path).
         self._job: dict | None = None
         self._stage_timings: dict[str, dict] = {}
@@ -559,6 +577,7 @@ class ApiTransport:
                     "command": {"resume": {"action": "respond", "userResponse": answer}},
                     "config": config,
                     "multitask_strategy": "interrupt",
+                    "stream_mode": _RUN_STREAM_MODES,
                 },
             )
             self._persist_continuation(job_id, thread_id, session_id, config, run_id, interrupts=[])
@@ -1146,6 +1165,7 @@ class ApiTransport:
             "input": {"messages": [{"type": "human", "content": prompt}]},
             "config": config,
             "multitask_strategy": "rollback",
+            "stream_mode": _RUN_STREAM_MODES,
         }
         run_id = self._post_run(thread_id, run_body)
         self._persist_continuation(
@@ -1170,7 +1190,28 @@ class ApiTransport:
         questions: list[dict] = []
         job_id = str(job.get("job_id") or "")
         session_id = _session_id(job)
+        try:
+            return self._drive_run_inner(thread_id, run_id, config, job, deadline, questions, job_id, session_id)
+        finally:
+            if (stop := getattr(self, "_active_stream_stop", None)) is not None:
+                stop.set()
+                self._active_stream_stop = None
+
+    def _drive_run_inner(
+        self,
+        thread_id: str,
+        run_id: str,
+        config: dict[str, Any],
+        job: dict,
+        deadline: float,
+        questions: list[dict],
+        job_id: str,
+        session_id: str,
+    ) -> tuple[str, list[dict]]:
         while True:
+            self._active_stream_stop = self._refresh_stream_listener(
+                thread_id, run_id, job, getattr(self, "_active_stream_stop", None)
+            )
             status = self._await_run(thread_id, run_id, deadline, job_id)
             if status == "interrupted":
                 interrupts = self._pending_interrupts(thread_id)
@@ -1209,6 +1250,7 @@ class ApiTransport:
                         "command": {"resume": resume_value},
                         "config": config,
                         "multitask_strategy": "interrupt",
+                        "stream_mode": _RUN_STREAM_MODES,
                     },
                 )
                 self._persist_continuation(job_id, thread_id, session_id, config, run_id, interrupts=[])
@@ -1304,6 +1346,95 @@ class ApiTransport:
                 if err:
                     details.append(str(err)[:300])
         return "; ".join(details) or "unknown error"
+
+    # ── run event stream (enhancement channel; poll drives completion) ───────
+    @staticmethod
+    def _iter_sse(resp):
+        """Yield (event, data) pairs from a line-iterable SSE response body."""
+        event: str | None = None
+        data_lines: list[str] = []
+        for raw in resp:
+            line = raw.decode("utf-8", "replace").rstrip("\r\n") if isinstance(raw, bytes) else str(raw).rstrip("\r\n")
+            if line == "":
+                if data_lines:
+                    yield (event or "message", "\n".join(data_lines))
+                event, data_lines = None, []
+                continue
+            if line.startswith(":"):
+                continue
+            if line.startswith("event:"):
+                event = line[len("event:") :].strip()
+            elif line.startswith("data:"):
+                data_lines.append(line[len("data:") :].lstrip())
+        if data_lines:
+            yield (event or "message", "\n".join(data_lines))
+
+    def _refresh_stream_listener(self, thread_id: str, run_id: str, job: dict, prev: threading.Event | None):
+        """(Re)start the run-stream listener when the run id changes; return the live stop event."""
+        if not _stream_enabled() or not str(job.get("job_id") or ""):
+            return prev
+        if prev is not None and getattr(prev, "run_id", None) == run_id:
+            return prev
+        if prev is not None:
+            prev.set()
+        stop = threading.Event()
+        stop.run_id = run_id  # type: ignore[attr-defined]
+        threading.Thread(
+            target=self._consume_run_stream,
+            args=(thread_id, run_id, dict(job), stop),
+            daemon=True,
+            name=f"cassette-run-stream-{run_id[:8]}",
+        ).start()
+        return stop
+
+    def _consume_run_stream(self, thread_id: str, run_id: str, job: dict, stop: threading.Event) -> None:
+        """Join the run's SSE stream and fold events onto the persisted job.
+
+        Best-effort by design: any failure (drop, parse error, timeout) simply ends the listener —
+        the poll loop still drives the run, so the only loss is event granularity."""
+        job_id = str(job.get("job_id") or "")
+        session_id = _session_id(job)
+        try:
+            from . import jobs as jobs_mod
+            from . import timeline as timeline_mod
+
+            try:
+                baseline = self.get_project_document(session_id)
+            except Exception:  # noqa: BLE001 — fresh project: delta baseline is the empty document
+                baseline = {"version": 0, "entities": {}, "order": {}}
+            url = f"{_api_base()}/api/langgraph/threads/{thread_id}/runs/{run_id}/stream"
+            request = Request(url, headers=self._auth_headers({"Accept": "text/event-stream"}))
+            with urlopen(request, timeout=_stream_read_timeout()) as resp:
+                progress: list[str] = list(job.get("plan_progress") or [])
+                for event, data in self._iter_sse(resp):
+                    if stop.is_set():
+                        return
+                    if event != "custom":
+                        continue
+                    try:
+                        payload = json.loads(data)
+                    except ValueError:
+                        continue
+                    if not isinstance(payload, dict):
+                        continue
+                    if payload.get("type") == "project_operation_committed" and isinstance(
+                        payload.get("document"), dict
+                    ):
+                        delta = timeline_mod.render_delta(baseline, payload["document"])
+                        jobs_mod.update_job(job_id, timeline_delta=delta)
+                    else:
+                        label = str(
+                            payload.get("label")
+                            or payload.get("status")
+                            or payload.get("title")
+                            or payload.get("type")
+                            or ""
+                        ).strip()[:80]
+                        if label:
+                            progress = (progress + [label])[-10:]
+                            jobs_mod.update_job(job_id, plan_progress=progress)
+        except Exception:  # noqa: BLE001 — enhancement channel only
+            return
 
     def _post_run(self, thread_id: str, body: dict) -> str:
         _, resp = self._request("POST", f"/api/langgraph/threads/{thread_id}/runs", json_body=body, expect=200)

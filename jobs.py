@@ -74,6 +74,8 @@ def create_job(
         "quality": {},
         "final_screenshot": None,
         "editor_url": None,
+        "timeline_delta": None,
+        "plan_progress": [],
         "worker_pid": None,
     }
     save_job(job)
@@ -137,6 +139,8 @@ def merge_persisted_runtime_fields(job: dict) -> dict:
         "browser_events",
         "editor_url",
         "chat_thread_id",
+        "timeline_delta",
+        "plan_progress",
         "continuation",
         "resume_request",
     ):
