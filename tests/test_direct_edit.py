@@ -130,9 +130,7 @@ def test_edit_refuses_while_job_holds_session(cassette_env, commands_api):
     job = jobs.create_job("ed", "prompt", None, [], {"cassette_session_id": "try-session-ed"})
     jobs.update_job(job["job_id"], status="running")
     result = json.loads(
-        tools.cassette_edit(
-            {"session_id": "try-session-ed", "tool_name": "timeline_trim", "input": {"clipId": "c1"}}
-        )
+        tools.cassette_edit({"session_id": "try-session-ed", "tool_name": "timeline_trim", "input": {"clipId": "c1"}})
     )
     assert result["ok"] is False
     assert result["error"]["code"] == "job_active"
@@ -141,9 +139,7 @@ def test_edit_refuses_while_job_holds_session(cassette_env, commands_api):
 
 def test_edit_undo_maps_to_history_cursor(cassette_env, commands_api):
     result = json.loads(
-        tools.cassette_edit(
-            {"session_id": "try-session-ed", "tool_name": "undo", "input": {"cursorSequence": 4}}
-        )
+        tools.cassette_edit({"session_id": "try-session-ed", "tool_name": "undo", "input": {"cursorSequence": 4}})
     )
     assert result["ok"], result
     envelope = commands_api.rec["command_envelopes"][0]
@@ -168,7 +164,11 @@ def test_edit_surfaces_server_validation_error(cassette_env, monkeypatch):
                 self._body()
                 return self._json(
                     200,
-                    {"ok": False, "code": "VALIDATION_FAILED", "message": "input failed timeline_trim static validation"},
+                    {
+                        "ok": False,
+                        "code": "VALIDATION_FAILED",
+                        "message": "input failed timeline_trim static validation",
+                    },
                 )
             return super().do_POST()
 
@@ -176,9 +176,7 @@ def test_edit_surfaces_server_validation_error(cassette_env, monkeypatch):
     monkeypatch.setenv("CASSETTE_DIRECT_EDIT", "1")
     try:
         result = json.loads(
-            tools.cassette_edit(
-                {"session_id": "try-session-ed", "tool_name": "timeline_trim", "input": {"bogus": 1}}
-            )
+            tools.cassette_edit({"session_id": "try-session-ed", "tool_name": "timeline_trim", "input": {"bogus": 1}})
         )
         assert result["ok"] is False
         assert result["error"]["code"] == "validation_failed"

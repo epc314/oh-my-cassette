@@ -203,9 +203,7 @@ def test_contact_sheet_from_local_media(tmp_path, monkeypatch):
         check=True,
     )
     doc = _sample_doc()  # video clips named intro/beach/drone — no thumbnails anywhere
-    monkeypatch.setattr(
-        tools, "_sheet_media_lookup", lambda session_id: ({}, {"beach.mp4": str(source)})
-    )
+    monkeypatch.setattr(tools, "_sheet_media_lookup", lambda session_id: ({}, {"beach.mp4": str(source)}))
     sheet = tools.build_contact_sheet(doc, "try-session-localmedia")
     assert sheet is not None
     from pathlib import Path

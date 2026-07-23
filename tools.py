@@ -1035,9 +1035,7 @@ def _previews_dir(session_id: str) -> Path:
 
 
 _SHEET_CLIP_TYPES = {"video", "image", "motion-graphic"}
-_SHEET_CELL_FILTER = (
-    "scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2:color=0x07080b"
-)
+_SHEET_CELL_FILTER = "scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2:color=0x07080b"
 
 
 def _clip_source_midpoint_sec(clip: dict, fps: float) -> float:
@@ -1169,7 +1167,7 @@ def build_contact_sheet(document: dict, session_id: str) -> str | None:
                 if clip.get("type") == "image":
                     seek = None
                 cell = Path(tmp) / f"cell_{cell_index:02d}.jpg"
-                for attempt_seek in ([seek, 0.0] if seek else [None]):
+                for attempt_seek in [seek, 0.0] if seek else [None]:
                     cmd = [ffmpeg, "-v", "error", "-y"]
                     if headers:
                         cmd += ["-headers", headers]

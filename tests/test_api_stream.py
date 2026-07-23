@@ -42,7 +42,7 @@ def test_iter_sse_parses_events_and_multiline_data():
 
 
 def test_iter_sse_ignores_comments_and_handles_missing_trailing_blank():
-    body = io.BytesIO(b": keepalive\nevent: custom\ndata: {\"a\": 1}")
+    body = io.BytesIO(b': keepalive\nevent: custom\ndata: {"a": 1}')
     frames = list(ApiTransport._iter_sse(body))
     assert frames == [("custom", '{"a": 1}')]
 

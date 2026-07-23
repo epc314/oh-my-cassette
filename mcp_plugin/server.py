@@ -286,7 +286,7 @@ async def cassette_timeline(
         "Surgical no-LLM timeline edit through the manual-editor command lane (requires "
         "CASSETTE_DIRECT_EDIT=1). Use for small named changes (trim, text, delete, undo) after "
         "reading cassette_timeline; big or creative briefs go through cassette_run_job. input is "
-        "always {\"payload\": {...}}. Pass "
+        'always {"payload": {...}}. Pass '
         "expected_version from the last timeline read; tool_name 'undo' with "
         "input.cursorSequence rewinds the shared operation history."
     ),

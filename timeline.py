@@ -209,7 +209,9 @@ def render_ctl(document: dict, detail: str | None = None) -> str:
         cont = "   | "
         expanded = expand and expand.lower() == label.lower()
         remaining_tracks_need = sum(1 for t in tracks if _track_clips(document, str(t.get("id"))))
-        if not expanded and (len(clips_in_track) > _TRACK_CLIP_BUDGET or budget - len(clips_in_track) < remaining_tracks_need):
+        if not expanded and (
+            len(clips_in_track) > _TRACK_CLIP_BUDGET or budget - len(clips_in_track) < remaining_tracks_need
+        ):
             if budget <= remaining_tracks_need or (len(clips_in_track) > _TRACK_CLIP_BUDGET and budget < 6):
                 start, _ = _clip_range(clips_in_track[0], fps)
                 _, end = _clip_range(clips_in_track[-1], fps)
@@ -290,7 +292,9 @@ def _describe_change(clip_before: dict, clip_after: dict, fps: float) -> str:
         if old == new:
             continue
         if field in {"startFrame", "durationInFrames", "fadeInFrames", "fadeOutFrames"}:
-            changes.append(f"{field.removesuffix('InFrames').removesuffix('Frame')} {_tc(_seconds(old or 0, fps))} -> {_tc(_seconds(new or 0, fps))}")
+            changes.append(
+                f"{field.removesuffix('InFrames').removesuffix('Frame')} {_tc(_seconds(old or 0, fps))} -> {_tc(_seconds(new or 0, fps))}"
+            )
         elif field == "text":
             changes.append(f'text -> "{str(new or "")[:24]}"')
         else:
@@ -299,7 +303,7 @@ def _describe_change(clip_before: dict, clip_after: dict, fps: float) -> str:
 
 
 def render_delta(before: dict, after: dict) -> str:
-    """"+ ~ -" summary between two ProjectDocument snapshots, capped at DELTA_MAX_LINES."""
+    """ "+ ~ -" summary between two ProjectDocument snapshots, capped at DELTA_MAX_LINES."""
     fps = _timebase(after) or _timebase(before)
     labels = track_labels(after)
     letters = clip_letters(after)
@@ -319,7 +323,9 @@ def render_delta(before: dict, after: dict) -> str:
     ]
 
     ops = len(added) + len(removed) + len(changed)
-    header = f"CHANGES v{before.get('version', 0)} -> v{after.get('version', 0)}  ({ops} change{'s' if ops != 1 else ''})"
+    header = (
+        f"CHANGES v{before.get('version', 0)} -> v{after.get('version', 0)}  ({ops} change{'s' if ops != 1 else ''})"
+    )
     lines = [header]
     for old, new in changed:
         lines.append(f"~ {_label(new, after)} {_clip_display_name(new)}  {_describe_change(old, new, fps)}")
@@ -336,7 +342,11 @@ def render_delta(before: dict, after: dict) -> str:
     before_total, after_total = total_duration_seconds(before), total_duration_seconds(after)
     if abs(before_total - after_total) >= 0.05:
         lines.append(f"total {_tc(before_total)} -> {_tc(after_total)}")
-    return "\n".join(lines) if ops else f"CHANGES v{before.get('version', 0)} -> v{after.get('version', 0)}  (no clip changes)"
+    return (
+        "\n".join(lines)
+        if ops
+        else f"CHANGES v{before.get('version', 0)} -> v{after.get('version', 0)}  (no clip changes)"
+    )
 
 
 # ── plan review block ─────────────────────────────────────────────────────────
