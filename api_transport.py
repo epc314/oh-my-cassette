@@ -304,7 +304,10 @@ def _stream_read_timeout() -> float:
 
 # Stream modes requested for every run so a later join (plugin listener OR the user's /try tab)
 # replays commit/plan events; 'custom' carries ProjectCommitEvents, 'updates' the node progress.
-_RUN_STREAM_MODES = ["updates", "custom"]
+# Mirror the editor's AGENT_STREAM_MODES exactly: a /try tab that live-joins a plugin run gets
+# the same event surface as its own submits (chat tokens, tool events, values, custom commits).
+# The plugin's own SSE consumer reads only 'custom' frames, so the extra modes cost bandwidth only.
+_RUN_STREAM_MODES = ["values", "messages-tuple", "custom", "tools"]
 
 
 class ApiTransport:
