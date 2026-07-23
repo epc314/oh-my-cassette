@@ -349,6 +349,16 @@ class LocalMcpRuntime:
                 payload = {**payload, "data": data}
         return self._envelope_from_core(payload, session_id=session_id, artifacts=artifacts)
 
+    def edit(self, args: dict[str, Any]) -> ToolEnvelope:
+        session_id = str(args.get("session_id") or "").strip()
+        if not session_id:
+            return self._failure("session_id_required", "session_id is required", recoverable=True)
+        config_error = self._config_error(session_id=session_id)
+        if config_error:
+            return config_error
+        payload = self._invoke_core("cassette_edit", args, session_id=session_id)
+        return self._envelope_from_core(payload, session_id=session_id)
+
     def list_assets(self, args: dict[str, Any]) -> ToolEnvelope:
         session_id = str(args.get("session_id") or "").strip() or None
         config_error = self._config_error(session_id=session_id)

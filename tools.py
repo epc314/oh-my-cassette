@@ -62,6 +62,11 @@ def _safe_call(tool_name: str, fn, args: dict, **kwargs) -> str:
     except CassetteError as exc:
         return err(tool_name, exc.code, str(exc), exc.details, exc.recoverable)
     except Exception as exc:
+        # Coded transport errors (ApiTransportError and friends) keep their code so hosts can
+        # react to e.g. validation_failed / stale_timeline instead of an opaque internal_error.
+        code = getattr(exc, "code", None)
+        if isinstance(code, str) and code:
+            return err(tool_name, code, str(exc), {"type": type(exc).__name__}, True)
         return err(tool_name, "internal_error", str(exc), {"type": type(exc).__name__}, True)
 
 
@@ -1088,6 +1093,112 @@ def build_contact_sheet(document: dict, session_id: str) -> str | None:
         return str(target) if target.exists() and target.stat().st_size else None
     except Exception:  # noqa: BLE001 — the sheet is an enhancement, never a failure mode
         return None
+
+
+# Curated no-LLM direct-edit surface: public editor tools whose inputs are self-contained
+# (no media resolution, no generation). The server statically validates every input against
+# TOOL_INPUT_JSON_SCHEMAS, so a wrong payload returns a precise validation message.
+_DIRECT_EDIT_TOOLS = {
+    "timeline_trim": "trim/retime a clip",
+    "timeline_arrange": "move/reorder clips",
+    "timeline_deleteClips": "delete clips",
+    "timeline_addTextClip": "add a text/title clip",
+    "timeline_text": "edit text content",
+    "timeline_textStyle": "style a text clip",
+    "timeline_textLayout": "lay out a text clip",
+    "timeline_properties": "clip properties (volume/speed/opacity/...)",
+    "timeline_filter": "apply/adjust filters",
+    "timeline_effect": "apply/adjust effects",
+    "timeline_keyframe": "keyframes",
+    "timeline_audio": "audio operations",
+    "timeline_track": "track operations",
+    "timeline_transition": "transitions",
+}
+_UNDO_TOOL = "set-operation-history-cursor"
+
+
+def _direct_edit_enabled() -> bool:
+    return str(os.getenv("CASSETTE_DIRECT_EDIT", "") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+@safe_tool
+def cassette_edit(a: dict, **kw) -> str:
+    """Surgical no-LLM timeline edit through the manual-editor command lane (flagged)."""
+    if not _direct_edit_enabled():
+        raise CassetteError(
+            "direct_edit_disabled",
+            "Direct edits are disabled. Set CASSETTE_DIRECT_EDIT=1 to enable cassette_edit.",
+            recoverable=False,
+        )
+    session_id = str(a.get("session_id") or "").strip()
+    tool_name = str(a.get("tool_name") or "").strip()
+    if not session_id or not tool_name:
+        raise CassetteError("missing_required_arg", "session_id and tool_name are required")
+
+    # One session, one writer: refuse while a run (or an unanswered question) holds the session.
+    # ponytail: advisory client-side guard; a server-side session lease only if two hosts ever
+    # share one session concurrently.
+    active = [
+        j
+        for j in jobs.list_jobs(None, limit=20)
+        if j.get("cassette_session_id") == session_id
+        and j.get("status") in {"queued", "running", "needs_user", "cancel_requested"}
+    ]
+    if active:
+        raise CassetteError(
+            "job_active",
+            f"Job {active[0]['job_id']} ({active[0]['status']}) holds this session; wait for it or cancel it first.",
+        )
+
+    from . import api_transport as api_mod
+    from . import timeline as timeline_mod
+
+    transport = api_mod.ApiTransport()
+    before = transport.get_project_document(session_id)
+    current_version = int(before.get("version") or 0)
+    expected_version = a.get("expected_version")
+    if expected_version is not None and int(expected_version) != current_version:
+        raise CassetteError(
+            "stale_timeline",
+            f"The project moved to v{current_version} since you last read it. Re-read and retry.",
+            details={"ctl": timeline_mod.render_ctl(before)},
+        )
+
+    import uuid as _uuid
+
+    if tool_name in {_UNDO_TOOL, "undo"}:
+        cursor_raw = (a.get("input") or {}).get("cursorSequence") if isinstance(a.get("input"), dict) else None
+        if cursor_raw is None:
+            raise CassetteError("missing_required_arg", "undo requires input.cursorSequence")
+        command: dict[str, Any] = {"type": _UNDO_TOOL, "cursorSequence": int(cursor_raw)}
+        envelope = {"commandId": str(_uuid.uuid4()), "source": "agent", "command": command}
+    else:
+        if tool_name not in _DIRECT_EDIT_TOOLS:
+            raise CassetteError(
+                "unknown_tool",
+                f"'{tool_name}' is not a direct-edit tool.",
+                details={"tools": _DIRECT_EDIT_TOOLS, "undo": _UNDO_TOOL},
+            )
+        if not isinstance(a.get("input"), dict):
+            raise CassetteError("missing_required_arg", "input (the tool's payload object) is required")
+        command = {"type": "agent-tool", "toolName": tool_name, "input": a["input"]}
+        envelope = {
+            "commandId": str(_uuid.uuid4()),
+            "source": "agent",
+            "toolName": tool_name,
+            "command": command,
+        }
+
+    event = transport.post_project_command(session_id, envelope)
+    after = event.get("document") if isinstance(event.get("document"), dict) else None
+    data: dict[str, Any] = {
+        "version_before": event.get("versionBefore", current_version),
+        "version_after": event.get("versionAfter"),
+    }
+    if after:
+        data["delta"] = timeline_mod.render_delta(before, after)
+        data["ctl"] = timeline_mod.render_ctl(after)
+    return ok(data)
 
 
 @safe_tool

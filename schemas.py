@@ -348,6 +348,37 @@ CASSETTE_TIMELINE = {
     },
 }
 
+CASSETTE_EDIT = {
+    "name": "cassette_edit",
+    "description": (
+        "Surgical no-LLM timeline edit through the manual-editor command lane (requires "
+        "CASSETTE_DIRECT_EDIT=1). Use for small named changes (trim, retime, text, delete, undo) "
+        "after reading cassette_timeline; big or creative briefs go through cassette_run_job. "
+        "Pass expected_version from the last timeline read — a stale version returns "
+        "stale_timeline with a fresh digest. tool_name 'undo' with input.cursorSequence rewinds "
+        "the shared operation history."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "session_id": {"type": "string"},
+            "tool_name": {
+                "type": "string",
+                "description": (
+                    "One of: timeline_trim, timeline_arrange, timeline_deleteClips, "
+                    "timeline_addTextClip, timeline_text, timeline_textStyle, timeline_textLayout, "
+                    "timeline_properties, timeline_filter, timeline_effect, timeline_keyframe, "
+                    "timeline_audio, timeline_track, timeline_transition, undo."
+                ),
+            },
+            "input": {"type": "object", "description": "The tool's payload; server-validated with precise errors."},
+            "expected_version": {"type": "integer", "description": "Document version from the last timeline read."},
+        },
+        "required": ["session_id", "tool_name"],
+        "additionalProperties": False,
+    },
+}
+
 CASSETTE_CANCEL_JOB = {
     "name": "cassette_cancel_job",
     "description": "Request cancellation for a persisted Cassette job. The worker observes the state and exits cleanly.",

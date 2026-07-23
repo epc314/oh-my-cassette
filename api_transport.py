@@ -1067,6 +1067,27 @@ class ApiTransport:
             raise ApiTransportError("project_document_missing", "Cassette returned no project document")
         return document
 
+    def post_project_command(self, session_id: str, envelope: dict) -> dict:
+        """POST a no-LLM project command (the manual-editor lane); returns the ProjectCommitEvent.
+
+        The route replies 200 for both outcomes: a commit event on success, or
+        {ok:false, code, message} on validation/commit failure."""
+        from urllib.parse import quote
+
+        self._authenticate()
+        _, body = self._request(
+            "POST",
+            f"/api/projects/{quote(str(session_id), safe='')}/commands",
+            json_body=envelope,
+            expect=200,
+        )
+        if not isinstance(body, dict):
+            raise ApiTransportError("command_failed", "Cassette returned a malformed command response")
+        if body.get("ok") is False:
+            code = str(body.get("code") or "command_failed").lower()
+            raise ApiTransportError(code, str(body.get("message") or "Project command failed"))
+        return body
+
     # ── agent run ─────────────────────────────────────────────────────────────
     def _create_thread(self, session_id: str, job: dict) -> str:
         # The upstream LangGraph server 422s non-UUID thread ids, so the thread id cannot be the

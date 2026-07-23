@@ -26,6 +26,7 @@ from .models import (
     IngestMediaInput,
     JamendoMatcherInput,
     JobStatusInput,
+    EditInput,
     ListAssetsInput,
     TimelineInput,
     MakePromptInput,
@@ -265,6 +266,27 @@ async def cassette_timeline(
 ) -> ToolEnvelope:
     request = TimelineInput(session_id=session_id, detail=detail, profile=profile, contact_sheet=contact_sheet)
     return await _run_sync(_runtime(ctx).timeline, request.model_dump(exclude_none=True))
+
+
+@mcp.tool(
+    description=(
+        "Surgical no-LLM timeline edit through the manual-editor command lane (requires "
+        "CASSETTE_DIRECT_EDIT=1). Use for small named changes (trim, text, delete, undo) after "
+        "reading cassette_timeline; big or creative briefs go through cassette_run_job. Pass "
+        "expected_version from the last timeline read; tool_name 'undo' with "
+        "input.cursorSequence rewinds the shared operation history."
+    ),
+    structured_output=True,
+)
+async def cassette_edit(
+    session_id: str,
+    tool_name: str,
+    ctx: Context,
+    input: dict[str, Any] | None = None,
+    expected_version: int | None = None,
+) -> ToolEnvelope:
+    request = EditInput(session_id=session_id, tool_name=tool_name, input=input, expected_version=expected_version)
+    return await _run_sync(_runtime(ctx).edit, request.model_dump(exclude_none=True))
 
 
 @mcp.tool(
