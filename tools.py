@@ -1095,20 +1095,18 @@ def build_contact_sheet(document: dict, session_id: str) -> str | None:
         return None
 
 
-# Curated no-LLM direct-edit surface: public editor tools whose inputs are self-contained
-# (no media resolution, no generation). The server statically validates every input against
-# TOOL_INPUT_JSON_SCHEMAS, so a wrong payload returns a precise validation message.
+# Curated no-LLM direct-edit surface: the intersection of the public tool catalog with the
+# server command lane's dispatch (toolNameToTimelineIntentType — verified live: addTextClip/
+# textStyle/textLayout/effect 500 as "Unsupported server project tool"), minus the
+# media-resolution/generation tools. Inputs are {"payload": {...}} and the server statically
+# validates them, returning precise messages on mismatch.
 _DIRECT_EDIT_TOOLS = {
     "timeline_trim": "trim/retime a clip",
     "timeline_arrange": "move/reorder clips",
     "timeline_deleteClips": "delete clips",
-    "timeline_addTextClip": "add a text/title clip",
-    "timeline_text": "edit text content",
-    "timeline_textStyle": "style a text clip",
-    "timeline_textLayout": "lay out a text clip",
+    "timeline_text": "text content/typography/box (op: setText/setStyle/setTypography/...)",
     "timeline_properties": "clip properties (volume/speed/opacity/...)",
     "timeline_filter": "apply/adjust filters",
-    "timeline_effect": "apply/adjust effects",
     "timeline_keyframe": "keyframes",
     "timeline_audio": "audio operations",
     "timeline_track": "track operations",

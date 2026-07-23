@@ -366,8 +366,7 @@ CASSETTE_EDIT = {
                 "type": "string",
                 "description": (
                     "One of: timeline_trim, timeline_arrange, timeline_deleteClips, "
-                    "timeline_addTextClip, timeline_text, timeline_textStyle, timeline_textLayout, "
-                    "timeline_properties, timeline_filter, timeline_effect, timeline_keyframe, "
+                    "timeline_text, timeline_properties, timeline_filter, timeline_keyframe, "
                     "timeline_audio, timeline_track, timeline_transition, undo."
                 ),
             },
