@@ -209,6 +209,12 @@ class RunJobInput(StrictModel):
         return self
 
 
+class ConfigInput(StrictModel):
+    session_id: str
+    model: str | None = None
+    thinking_level: Literal["low", "medium", "high"] | None = None
+
+
 class JobStatusInput(StrictModel):
     job_id: str | None = None
     session_id: str | None = None

@@ -1994,20 +1994,6 @@ def test_gateway_edit_slash_command_without_assets_gets_fixed_reply(cassette_env
 
 def test_gateway_first_edit_requests_cassette_model_choice_once(cassette_env, monkeypatch):
     monkeypatch.setenv("CASSETTE_GATEWAY_MODEL_CHOICE_ENABLED", "1")
-    monkeypatch.setattr(
-        tools.browser,
-        "fetch_cassette_model_options",
-        lambda language="zh": {
-            "models": [{"label": "DeepSeek V4 Flash"}, {"label": "Kimi K2.6"}],
-            "thinking_levels": [
-                {"label": "低", "value": "Low"},
-                {"label": "中", "value": "Medium"},
-                {"label": "高", "value": "High"},
-            ],
-            "source": "cassette_agent_page",
-            "language": language,
-        },
-    )
     media = cassette_env["source_root"] / "clip.mp4"
     media.write_bytes(b"video")
     sent = []
@@ -2036,7 +2022,7 @@ def test_gateway_first_edit_requests_cassette_model_choice_once(cassette_env, mo
     assert requested["reason"] == "cassette_model_choice_requested"
     assert "请选择当前 Cassette 会话使用的模型" in sent[-1][1]
     assert "1. DeepSeek V4 Flash" in sent[-1][1]
-    assert "2. Kimi K2.6" in sent[-1][1]
+    assert "2. DeepSeek V4 Pro" in sent[-1][1]
 
     model_choice = tools.ingest_gateway_media(
         event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="2", message_id="model_choice"),
@@ -2044,8 +2030,8 @@ def test_gateway_first_edit_requests_cassette_model_choice_once(cassette_env, mo
     )
     assert model_choice is not None
     assert model_choice["reason"] == "cassette_model_thinking_choice_requested"
-    assert "已选择模型：Kimi K2.6" in sent[-1][1]
-    assert "3. 高" in sent[-1][1]
+    assert "已选择模型：DeepSeek V4 Pro" in sent[-1][1]
+    assert "3. High" in sent[-1][1]
 
     thinking_choice = tools.ingest_gateway_media(
         event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="3", message_id="thinking_choice"),
@@ -2054,7 +2040,7 @@ def test_gateway_first_edit_requests_cassette_model_choice_once(cassette_env, mo
     assert thinking_choice is not None
     assert thinking_choice["reason"] == "cassette_prompt_optimization_choice_requested"
     prefs = tools._load_session_preferences(session_id)
-    assert prefs["cassette_model"] == "Kimi K2.6"
+    assert prefs["cassette_model"] == "DeepSeek V4 Pro"
     assert prefs["cassette_thinking_level"] == "High"
     assert prefs["cassette_model_selection_completed"] is True
 
@@ -2159,20 +2145,6 @@ def test_gateway_cut_slash_command_clears_pending_model_choice(cassette_env, mon
 
 def test_gateway_semantic_first_edit_requests_cassette_model_choice_before_bgm(cassette_env, monkeypatch):
     monkeypatch.setenv("CASSETTE_GATEWAY_MODEL_CHOICE_ENABLED", "1")
-    monkeypatch.setattr(
-        tools.browser,
-        "fetch_cassette_model_options",
-        lambda language="zh": {
-            "models": [{"label": "DeepSeek V4 Flash"}, {"label": "Kimi K2.6"}],
-            "thinking_levels": [
-                {"label": "低", "value": "Low"},
-                {"label": "中", "value": "Medium"},
-                {"label": "高", "value": "High"},
-            ],
-            "source": "cassette_agent_page",
-            "language": language,
-        },
-    )
     media = cassette_env["source_root"] / "clip.mp4"
     media.write_bytes(b"video")
     sent = []
@@ -2208,7 +2180,7 @@ def test_gateway_semantic_first_edit_requests_cassette_model_choice_before_bgm(c
     )
     assert model_choice is not None
     assert model_choice["reason"] == "cassette_model_thinking_choice_requested"
-    assert "已选择模型：Kimi K2.6" in sent[-1][1]
+    assert "已选择模型：DeepSeek V4 Pro" in sent[-1][1]
 
     thinking_choice = tools.ingest_gateway_media(
         event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="3", message_id="thinking_choice"),
@@ -2231,7 +2203,7 @@ def test_gateway_semantic_first_edit_requests_cassette_model_choice_before_bgm(c
     assert pending["state"] == "awaiting_bgm_choice"
     assert pending["optimization_enabled"] is False
     prefs = tools._load_session_preferences(session_id)
-    assert prefs["cassette_model"] == "Kimi K2.6"
+    assert prefs["cassette_model"] == "DeepSeek V4 Pro"
     assert prefs["cassette_thinking_level"] == "High"
     assert prefs["cassette_model_selection_completed"] is True
 
@@ -2258,16 +2230,6 @@ def test_gateway_semantic_first_edit_requests_cassette_model_choice_before_bgm(c
 
 
 def test_gateway_cassette_model_command_sets_preference_without_assets(cassette_env, monkeypatch):
-    monkeypatch.setattr(
-        tools.browser,
-        "fetch_cassette_model_options",
-        lambda language="zh": {
-            "models": [{"label": "DeepSeek V4 Flash"}, {"label": "MiMo V2.5 Pro"}],
-            "thinking_levels": [{"label": "低", "value": "Low"}, {"label": "高", "value": "High"}],
-            "source": "cassette_agent_page",
-            "language": language,
-        },
-    )
     sent = []
     source = SimpleNamespace(
         platform=SimpleNamespace(value="qqbot"), chat_id="qq_openid_raw", user_id="qq_user_raw", chat_type="dm"
@@ -2286,7 +2248,7 @@ def test_gateway_cassette_model_command_sets_preference_without_assets(cassette_
     )
     assert result is not None
     assert result["reason"] == "cassette_model_choice_requested"
-    assert "MiMo V2.5 Pro" in sent[-1][1]
+    assert "DeepSeek V4 Pro" in sent[-1][1]
 
     tools.ingest_gateway_media(
         event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="2", message_id="model_choice"),
@@ -2299,36 +2261,8 @@ def test_gateway_cassette_model_command_sets_preference_without_assets(cassette_
     assert result is not None
     assert result["reason"] == "cassette_model_set"
     prefs = tools._load_session_preferences(session_id)
-    assert prefs["cassette_model"] == "MiMo V2.5 Pro"
-    assert prefs["cassette_thinking_level"] == "High"
-
-
-def test_gateway_model_choice_does_not_fallback_to_hardcoded_options(cassette_env, monkeypatch):
-    def fail_fetch(language="zh"):
-        raise RuntimeError("cassette_unreachable")
-
-    monkeypatch.setattr(tools.browser, "fetch_cassette_model_options", fail_fetch)
-    sent = []
-    source = SimpleNamespace(
-        platform=SimpleNamespace(value="qqbot"), chat_id="qq_openid_raw", user_id="qq_user_raw", chat_type="dm"
-    )
-    gateway = SimpleNamespace(
-        _is_user_authorized=lambda _: True,
-        adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
-    )
-
-    result = tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source, media_urls=[], media_types=[], text="/cassette_model", message_id="model_command"
-        ),
-        gateway=gateway,
-    )
-
-    assert result is not None
-    assert result["reason"] == "cassette_model_options_unavailable"
-    assert "无法从 Cassette 页面获取模型列表" in sent[-1][1]
-    assert "DeepSeek" not in sent[-1][1]
-    assert "Kimi" not in sent[-1][1]
+    assert prefs["cassette_model"] == "DeepSeek V4 Pro"
+    assert prefs["cassette_thinking_level"] == "Medium"
 
 
 def test_gateway_cut_slash_command_requests_active_job_cancel(cassette_env):
@@ -3771,3 +3705,50 @@ def test_run_job_requires_message_or_prompt(cassette_env):
     payload = json.loads(tools.cassette_run_job({"session_id": "empty"}))
     assert payload["ok"] is False
     assert payload["error"]["code"] == "missing_required_arg"
+
+
+def test_cassette_config_get_returns_defaults_and_options(cassette_env):
+    payload = json.loads(tools.cassette_config({"session_id": "cfg-get"}))
+    assert payload["ok"] is True
+    data = payload["data"]
+    assert data["model"] == "DeepSeek V4 Flash"
+    assert data["thinking_level"] == "Low"
+    assert data["source"] == "default"
+    labels = [m["label"] for m in data["options"]["models"]]
+    assert labels == ["DeepSeek V4 Flash", "DeepSeek V4 Pro", "GPT 5.4 Mini"]
+    assert data["options"]["source"] == "static_product_list"
+
+
+def test_cassette_config_set_persists_and_applies_to_model_selection(cassette_env):
+    set_payload = json.loads(
+        tools.cassette_config({"session_id": "cfg-set", "model": "deepseek/deepseek-v4-pro", "thinking_level": "medium"})
+    )
+    assert set_payload["ok"] is True
+    assert set_payload["data"]["model"] == "DeepSeek V4 Pro"
+    assert set_payload["data"]["thinking_level"] == "Medium"
+    assert set_payload["data"]["source"] == "session_preference"
+
+    # The preference now drives run_job model selection on ANY host (no delivery/platform gate).
+    selection = tools._cassette_model_selection({"session_id": "cfg-set"}, None)
+    assert selection == {"model": "DeepSeek V4 Pro", "thinking_level": "Medium", "source": "session_preference"}
+
+    # Explicit run args still beat the session preference.
+    explicit = tools._cassette_model_selection({"session_id": "cfg-set", "cassette_model": "GPT 5.4 Mini"}, None)
+    assert explicit["model"] == "GPT 5.4 Mini"
+    assert explicit["source"] == "user_or_default"
+
+
+def test_cassette_config_accepts_label_and_rejects_unknown(cassette_env):
+    by_label = json.loads(tools.cassette_config({"session_id": "cfg-label", "model": "gpt 5.4 mini"}))
+    assert by_label["ok"] and by_label["data"]["model"] == "GPT 5.4 Mini"
+
+    bad_model = json.loads(tools.cassette_config({"session_id": "cfg-label", "model": "gpt-9-ultra"}))
+    assert bad_model["ok"] is False and bad_model["error"]["code"] == "invalid_cassette_model"
+
+    bad_thinking = json.loads(tools.cassette_config({"session_id": "cfg-label", "thinking_level": "max"}))
+    assert bad_thinking["ok"] is False and bad_thinking["error"]["code"] == "invalid_thinking_level"
+
+    # Thinking-only set keeps the saved model.
+    only_thinking = json.loads(tools.cassette_config({"session_id": "cfg-label", "thinking_level": "high"}))
+    assert only_thinking["ok"] and only_thinking["data"]["model"] == "GPT 5.4 Mini"
+    assert only_thinking["data"]["thinking_level"] == "High"

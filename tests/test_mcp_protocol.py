@@ -32,6 +32,7 @@ EXPECTED_TOOLS = {
     "cassette_cancel_job",
     "cassette_timeline",
     "cassette_edit",
+    "cassette_config",
 }
 
 
@@ -201,6 +202,7 @@ def test_real_stdio_process_initializes_and_calls_every_tool(tmp_path):
                         "tool_name": "timeline_trim",
                         "input": {"clipId": "c1"},
                     },
+                    "cassette_config": {"session_id": session_id, "model": "DeepSeek V4 Pro"},
                 }
                 seen = {"cassette_ingest_media"}
                 results = {}
@@ -213,6 +215,8 @@ def test_real_stdio_process_initializes_and_calls_every_tool(tmp_path):
                 assert results["cassette_make_prompt"].structuredContent["ok"] is True
                 assert results["cassette_answer_question"].structuredContent["ok"] is True
                 assert results["cassette_run_job"].structuredContent["error"]["code"] == "auth_required"
+                assert results["cassette_config"].structuredContent["ok"] is True
+                assert results["cassette_config"].structuredContent["data"]["model"] == "DeepSeek V4 Pro"
                 command = results["cassette_run_job"].structuredContent["error"]["details"]["setup_command"]
                 assert command.endswith("scripts/setup_local_mcp.py")
 

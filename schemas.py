@@ -403,3 +403,27 @@ CASSETTE_CANCEL_JOB = {
         "additionalProperties": False,
     },
 }
+
+CASSETTE_CONFIG = {
+    "name": "cassette_config",
+    "description": (
+        "Get or set the session's Cassette model and thinking level. Call with only session_id to "
+        "list the current choice and available options; pass model (id or label) and/or "
+        "thinking_level to change them. Changes persist for the session and apply from the next "
+        "cassette_run_job turn. Never ask the user upfront — defaults match the web editor; change "
+        "only when the user asks."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "session_id": {"type": "string"},
+            "model": {
+                "type": "string",
+                "description": "Product model id (e.g. deepseek/deepseek-v4-pro) or display label (e.g. DeepSeek V4 Pro).",
+            },
+            "thinking_level": {"type": "string", "enum": ["low", "medium", "high"]},
+        },
+        "required": ["session_id"],
+        "additionalProperties": False,
+    },
+}

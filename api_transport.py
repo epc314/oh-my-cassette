@@ -73,21 +73,21 @@ _NAVIGATE_NOOP_RESULT = {
 # plugin's model_selection holds UI labels (or is empty), so it is only forwarded when it already
 # names a product model id; otherwise the configured/default model is used.
 DEFAULT_AGENT_MODEL_ID = "deepseek/deepseek-v4-flash"
-_SUPPORTED_AGENT_MODEL_IDS = frozenset(
-    {
-        "deepseek/deepseek-v4-flash",
-        "deepseek/deepseek-v4-pro",
-        "openai/gpt-5.4-mini",
-    }
+# Single source for the product model list (id + display label): cassette_config, the gateway
+# /cassette_model picker, and the run-time resolver all derive from this tuple.
+AGENT_MODEL_OPTIONS = (
+    {"id": "deepseek/deepseek-v4-flash", "label": "DeepSeek V4 Flash"},
+    {"id": "deepseek/deepseek-v4-pro", "label": "DeepSeek V4 Pro"},
+    {"id": "openai/gpt-5.4-mini", "label": "GPT 5.4 Mini"},
 )
+_SUPPORTED_AGENT_MODEL_IDS = frozenset(option["id"] for option in AGENT_MODEL_OPTIONS)
 # The plugin's model_selection stores a UI *label* (browser.py scrapes only the label, not the id),
-# so map the label -> agent model id to honor the user's model choice on the api path. Labels are
-# locale-independent brand names (cassette-config MODEL_OPTIONS i18n; identical in zh and en).
+# so map the normalized label -> agent model id to honor the user's model choice on the api path.
+# Labels are locale-independent brand names (cassette-config MODEL_OPTIONS i18n; same in zh/en).
 _MODEL_LABEL_TO_ID = {
-    "deepseekv4flash": "deepseek/deepseek-v4-flash",
-    "deepseekv4pro": "deepseek/deepseek-v4-pro",
-    "gpt54mini": "openai/gpt-5.4-mini",
+    "".join(ch for ch in option["label"].lower() if ch.isalnum()): option["id"] for option in AGENT_MODEL_OPTIONS
 }
+AGENT_THINKING_LEVELS = ("low", "medium", "high")
 _DEFAULT_THINKING = "low"  # matches cassette-config DEFAULT_THINKING / per-model defaultThinking
 
 

@@ -23,6 +23,7 @@ from .models import (
     AnswerQuestionInput,
     SessionPhase,
     CancelJobInput,
+    ConfigInput,
     IngestMediaInput,
     JamendoMatcherInput,
     JobStatusInput,
@@ -594,6 +595,29 @@ async def cassette_review_completion(
 async def cassette_cancel_job(job_id: str, ctx: Context) -> ToolEnvelope:
     request = CancelJobInput(job_id=job_id)
     return await _run_sync(_runtime(ctx).cancel_job, request.model_dump(exclude_none=True))
+
+
+@mcp.tool(
+    description=(
+        "Get or set the session's Cassette model and thinking level. Call with only session_id to "
+        "see the current choice and available options; pass model (id or label) and/or "
+        "thinking_level to change them — persisted for the session, applied from the next "
+        "cassette_run_job turn. Defaults match the web editor; change only when the user asks."
+    ),
+    structured_output=True,
+)
+async def cassette_config(
+    session_id: str,
+    ctx: Context,
+    model: str | None = None,
+    thinking_level: Literal["low", "medium", "high"] | None = None,
+) -> ToolEnvelope:
+    request = ConfigInput(session_id=session_id, model=model, thinking_level=thinking_level)
+    return await _run_sync(
+        _runtime(ctx).simple_session_tool,
+        "cassette_config",
+        request.model_dump(exclude_none=True),
+    )
 
 
 def main() -> None:

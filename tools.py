@@ -667,21 +667,23 @@ def _normalize_thinking_level(value: str | None, text: str = "") -> str:
 
 def _cassette_model_selection(args: dict, delivery: dict | None = None) -> dict:
     session_id = str(args.get("session_id") or "").strip()
-    platform = _normalize_platform_name((delivery or {}).get("platform"))
-    if session_id and platform in {"qqbot", "weixin", "telegram", "web"}:
+    del delivery  # session prefs apply on every host (MCP included), not just gateways
+    # Precedence: explicit run args > session preference (cassette_config / /cassette_model) > default.
+    if args.get("cassette_model") or args.get("model") or args.get("thinking_level"):
+        text = "\n".join(
+            str(args.get(key) or "") for key in ("chat_message", "cassette_message", "instruction", "prompt")
+        )
+        return {
+            "model": (args.get("cassette_model") or args.get("model") or "").strip(),
+            "thinking_level": _normalize_thinking_level(args.get("thinking_level"), text),
+            "source": "user_or_default",
+        }
+    if session_id:
         preference = _cassette_model_preference_for_session(session_id)
         if preference:
             return {**preference, "source": "session_preference"}
     text = "\n".join(str(args.get(key) or "") for key in ("chat_message", "cassette_message", "instruction", "prompt"))
-    model = (args.get("cassette_model") or args.get("model") or "").strip()
-    thinking_level = _normalize_thinking_level(args.get("thinking_level"), text)
-    return {
-        "model": model,
-        "thinking_level": thinking_level,
-        "source": "user_or_default"
-        if args.get("cassette_model") or args.get("model") or args.get("thinking_level")
-        else "default",
-    }
+    return {"model": "", "thinking_level": _normalize_thinking_level(None, text), "source": "default"}
 
 
 def _gateway_background_jobs_enabled() -> bool:
@@ -1033,6 +1035,65 @@ def cassette_cancel_job(a: dict, **kw) -> str:
         raise CassetteError("missing_required_arg", "job_id is required")
     job = jobs.request_cancel(a["job_id"])
     return ok({"job_id": job["job_id"], "status": job["status"]}, job_id=job["job_id"])
+
+
+def _model_label_from_input(value: str) -> str:
+    """Accept a product model id or display label; return the canonical display label."""
+    from . import api_transport
+
+    norm = "".join(ch for ch in str(value).lower() if ch.isalnum())
+    for option in api_transport.AGENT_MODEL_OPTIONS:
+        if value == option["id"] or norm == "".join(ch for ch in option["label"].lower() if ch.isalnum()):
+            return option["label"]
+    raise CassetteError(
+        "invalid_cassette_model",
+        f"Unknown Cassette model {value!r}",
+        {"options": [f"{option['label']} ({option['id']})" for option in api_transport.AGENT_MODEL_OPTIONS]},
+    )
+
+
+@safe_tool
+def cassette_config(a: dict, **kw) -> str:
+    """Get/set the session's Cassette model and thinking level (applies from the next turn)."""
+    from . import api_transport
+
+    session_id = str(a.get("session_id") or "").strip()
+    if not session_id:
+        raise CassetteError("missing_required_arg", "session_id is required")
+    model_arg = str(a.get("model") or a.get("cassette_model") or "").strip()
+    thinking_arg = str(a.get("thinking_level") or "").strip()
+    if thinking_arg and thinking_arg.lower() not in set(api_transport.AGENT_THINKING_LEVELS):
+        raise CassetteError(
+            "invalid_thinking_level",
+            f"Unknown thinking level {thinking_arg!r}",
+            {"options": list(api_transport.AGENT_THINKING_LEVELS)},
+        )
+    if model_arg or thinking_arg:
+        current = _cassette_model_preference_for_session(session_id)
+        label = _model_label_from_input(model_arg) if model_arg else (current.get("model") or "")
+        if not label:
+            label = next(
+                option["label"]
+                for option in api_transport.AGENT_MODEL_OPTIONS
+                if option["id"] == api_transport.DEFAULT_AGENT_MODEL_ID
+            )
+        thinking = thinking_arg or current.get("thinking_level") or api_transport._DEFAULT_THINKING
+        _save_cassette_model_preference(session_id, label, thinking, source="cassette_config")
+    preference = _cassette_model_preference_for_session(session_id)
+    default_label = next(
+        option["label"]
+        for option in api_transport.AGENT_MODEL_OPTIONS
+        if option["id"] == api_transport.DEFAULT_AGENT_MODEL_ID
+    )
+    return ok(
+        {
+            "session_id": session_id,
+            "model": preference.get("model") or default_label,
+            "thinking_level": preference.get("thinking_level") or "Low",
+            "source": "session_preference" if preference else "default",
+            "options": _cassette_model_options(),
+        }
+    )
 
 
 def _previews_dir(session_id: str) -> Path:
@@ -2436,14 +2497,18 @@ def _save_cassette_model_preference(session_id: str, model: str, thinking_level:
 
 
 def _cassette_model_options(language: str = "zh") -> dict[str, Any]:
-    options = browser.fetch_cassette_model_options(language=language)
-    if not options.get("models"):
-        raise CassetteError(
-            "cassette_model_options_empty",
-            "Cassette model options were not available from the Cassette page.",
-            {"source": options.get("source") or "cassette_agent_page"},
-        )
-    return options
+    # Static product list single-sourced from the API transport — no browser scraping, cannot
+    # fail or block. Labels are locale-independent brand names, so `language` is unused.
+    from . import api_transport
+
+    del language
+    return {
+        "models": [{"label": option["label"], "id": option["id"]} for option in api_transport.AGENT_MODEL_OPTIONS],
+        "thinking_levels": [
+            {"label": level.capitalize(), "value": level.capitalize()} for level in api_transport.AGENT_THINKING_LEVELS
+        ],
+        "source": "static_product_list",
+    }
 
 
 def _model_options_error_details(exc: Exception) -> dict[str, str]:
