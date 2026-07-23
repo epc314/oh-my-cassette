@@ -180,3 +180,46 @@ def test_contact_sheet_skips_without_posters(tmp_path, monkeypatch):
 
     monkeypatch.setenv("CASSETTE_ASSET_ROOT", str(tmp_path))
     assert tools.build_contact_sheet(_sample_doc(), "try-session-abc") is None
+
+
+def test_contact_sheet_from_local_media(tmp_path, monkeypatch):
+    """API-job path: no poster data URIs — frames come from the locally ingested media file."""
+    import shutil
+    import subprocess
+
+    import pytest as _pytest
+
+    from cassette import tools
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        _pytest.skip("ffmpeg not installed")
+    monkeypatch.setenv("CASSETTE_ASSET_ROOT", str(tmp_path))
+    source = tmp_path / "beach.mp4"
+    subprocess.run(
+        [ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=teal:s=64x36:d=2:r=30", str(source)],
+        capture_output=True,
+        timeout=30,
+        check=True,
+    )
+    doc = _sample_doc()  # video clips named intro/beach/drone — no thumbnails anywhere
+    monkeypatch.setattr(
+        tools, "_sheet_media_lookup", lambda session_id: ({}, {"beach.mp4": str(source)})
+    )
+    sheet = tools.build_contact_sheet(doc, "try-session-localmedia")
+    assert sheet is not None
+    from pathlib import Path
+
+    assert Path(sheet).exists() and Path(sheet).stat().st_size > 0
+
+
+def test_clip_source_midpoint_seek():
+    from cassette.tools import _clip_source_midpoint_sec
+
+    # 4s of timeline at speed 1.5 starting 2s into the source -> mid at 2 + 3 = 5s.
+    clip = {"inSec": 2.0, "durationInFrames": 120, "speed": 1.5}
+    assert abs(_clip_source_midpoint_sec(clip, 30.0) - 5.0) < 1e-6
+    # Clamped inside the known source duration.
+    clip["sourceDurationSeconds"] = 4.0
+    assert _clip_source_midpoint_sec(clip, 30.0) <= 3.9 + 1e-6
+    assert _clip_source_midpoint_sec({}, 30.0) == 0.0

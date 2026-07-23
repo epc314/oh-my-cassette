@@ -1034,22 +1034,91 @@ def _previews_dir(session_id: str) -> Path:
     return Path(os.getenv("CASSETTE_ASSET_ROOT", str(manifest.get_asset_root()))) / "previews" / safe
 
 
-def build_contact_sheet(document: dict, session_id: str) -> str | None:
-    """Tile stored clip poster thumbnails (base64 data URIs on the document) into one jpeg.
+_SHEET_CLIP_TYPES = {"video", "image", "motion-graphic"}
+_SHEET_CELL_FILTER = (
+    "scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2:color=0x07080b"
+)
 
-    Zero server render: the posters were captured at upload time. Returns None when there is
-    nothing to tile or ffmpeg is unavailable — the CTL text always stands on its own."""
+
+def _clip_source_midpoint_sec(clip: dict, fps: float) -> float:
+    """Source-time midpoint of what the timeline actually uses from this clip."""
+    try:
+        in_sec = float(clip.get("inSec") or 0.0)
+        duration = float(clip.get("durationInFrames") or 0) / fps if fps else 0.0
+        speed = float(clip.get("speed") or 1.0) or 1.0
+        mid = in_sec + (duration * speed) / 2.0
+        source_max = clip.get("sourceDurationSeconds")
+        if isinstance(source_max, (int, float)) and source_max > 0.2:
+            mid = min(mid, float(source_max) - 0.1)
+        return max(0.0, mid)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _sheet_media_lookup(session_id: str) -> tuple[dict[str, str], dict[str, str]]:
+    """(mediaFileId -> local path, lowercase name -> local path) for the session's ingested media.
+
+    The upload cache maps local-file fingerprints to the mediaFileIds the server assigned, so
+    clips resolve back to the exact files the plugin uploaded. The project session id and the
+    ingest session id can differ by the try-session- prefix (Hermes mode) — try both."""
+    from . import api_transport as api_mod
+
+    by_id: dict[str, str] = {}
+    by_name: dict[str, str] = {}
+    candidates = [session_id]
+    if session_id.startswith("try-session-"):
+        candidates.append(session_id[len("try-session-") :])
+    cache: dict[str, str] = {}
+    for sid in candidates:
+        try:
+            cache.update(api_mod.ApiTransport()._load_upload_cache(sid) or {})
+        except Exception:  # noqa: BLE001
+            pass
+    for sid in candidates:
+        try:
+            listed = manifest.list_assets(sid)
+            assets = (listed.get("manifest") or {}).get("assets") or []
+        except Exception:  # noqa: BLE001
+            continue
+        for asset in assets:
+            path = str(asset.get("saved_path") or "")
+            if not path or not Path(path).exists():
+                continue
+            fingerprint = api_mod.ApiTransport._asset_fingerprint(path)
+            media_id = cache.get(fingerprint)
+            if media_id:
+                by_id.setdefault(str(media_id), path)
+            for key in (asset.get("original_name"), Path(path).name):
+                normalized = str(key or "").strip().lower()
+                if normalized:
+                    by_name.setdefault(normalized, path)
+    return by_id, by_name
+
+
+def build_contact_sheet(document: dict, session_id: str) -> str | None:
+    """Tile one frame per timeline clip into a contact-sheet jpeg (zero server render).
+
+    Frame sources, in order: the clip's stored poster data URI (browser uploads), the locally
+    ingested media file (matched by mediaFileId via the session upload cache, then by name via
+    the manifest), then the clip's preview/source URL fetched by ffmpeg with the agent bearer
+    (server-side/generated assets). Frames are taken at each clip's mid-point source position,
+    so the sheet is a filmstrip of what the timeline actually uses — still source frames, not
+    composed output. Returns None when nothing can be tiled or ffmpeg is unavailable."""
     import base64
     import shutil
     import subprocess
 
+    from . import api_transport as api_mod
     from . import timeline as timeline_mod
 
     try:
+        fps = float((document.get("sequenceTimebase") or {}).get("num") or document.get("fps") or 30) / float(
+            (document.get("sequenceTimebase") or {}).get("den") or 1
+        )
         clips = [
             c
             for c in timeline_mod.clips_in_timeline_order(document)
-            if isinstance(c.get("thumbnail"), str) and c["thumbnail"].startswith("data:image")
+            if c.get("type") in _SHEET_CLIP_TYPES or str(c.get("thumbnail") or "").startswith("data:image")
         ][:8]
         if not clips:
             return None
@@ -1061,12 +1130,61 @@ def build_contact_sheet(document: dict, session_id: str) -> str | None:
         target = out_dir / f"sheet-v{document.get('version', 0)}.jpg"
         if target.exists() and target.stat().st_size:
             return str(target)  # per-version sheets are immutable
+
+        by_id, by_name = _sheet_media_lookup(session_id)
+        transport: Any = None
+
         with tempfile.TemporaryDirectory(dir=str(out_dir)) as tmp:
-            for index, clip in enumerate(clips):
-                _, _, b64 = str(clip["thumbnail"]).partition(",")
-                (Path(tmp) / f"in_{index:02d}.jpg").write_bytes(base64.b64decode(b64 or "", validate=False))
-            cols = min(4, len(clips))
-            rows = -(-len(clips) // cols)
+            cell_index = 0
+            for clip in clips:
+                source: str | None = None
+                headers: str | None = None
+                seek: float | None = _clip_source_midpoint_sec(clip, fps)
+                thumb = str(clip.get("thumbnail") or "")
+                if thumb.startswith("data:image"):
+                    _, _, b64 = thumb.partition(",")
+                    poster = Path(tmp) / f"poster_{cell_index:02d}.img"
+                    poster.write_bytes(base64.b64decode(b64 or "", validate=False))
+                    source, seek = str(poster), None
+                if source is None:
+                    source = by_id.get(str(clip.get("mediaFileId") or ""))
+                if source is None:
+                    for key in (clip.get("originalFileName"), clip.get("sourceDisplayName"), clip.get("name")):
+                        normalized = str(key or "").strip().lower()
+                        if normalized and normalized in by_name:
+                            source = by_name[normalized]
+                            break
+                if source is None:
+                    url = str(clip.get("previewSrc") or clip.get("src") or "")
+                    if url.startswith("/"):
+                        url = api_mod._api_base() + url
+                    if url.startswith("http"):
+                        if transport is None:
+                            transport = api_mod.ApiTransport()
+                            transport._authenticate()
+                        source = url
+                        headers = f"Authorization: Bearer {transport._token}\r\n"
+                if source is None:
+                    continue
+                if clip.get("type") == "image":
+                    seek = None
+                cell = Path(tmp) / f"cell_{cell_index:02d}.jpg"
+                for attempt_seek in ([seek, 0.0] if seek else [None]):
+                    cmd = [ffmpeg, "-v", "error", "-y"]
+                    if headers:
+                        cmd += ["-headers", headers]
+                    if attempt_seek:
+                        cmd += ["-ss", f"{attempt_seek:.3f}"]
+                    cmd += ["-i", source, "-frames:v", "1", "-vf", _SHEET_CELL_FILTER, str(cell)]
+                    subprocess.run(cmd, capture_output=True, timeout=25)
+                    if cell.exists() and cell.stat().st_size:
+                        cell_index += 1
+                        break
+                    # A seek past the media's end yields no frame; retry from the start.
+            if not cell_index:
+                return None
+            cols = min(4, cell_index)
+            rows = -(-cell_index // cols)
             subprocess.run(
                 [
                     ffmpeg,
@@ -1076,13 +1194,9 @@ def build_contact_sheet(document: dict, session_id: str) -> str | None:
                     "-framerate",
                     "1",
                     "-i",
-                    str(Path(tmp) / "in_%02d.jpg"),
+                    str(Path(tmp) / "cell_%02d.jpg"),
                     "-vf",
-                    (
-                        "scale=320:180:force_original_aspect_ratio=decrease,"
-                        "pad=320:180:(ow-iw)/2:(oh-ih)/2:color=0x07080b,"
-                        f"tile={cols}x{rows}:padding=4:color=0x07080b"
-                    ),
+                    f"tile={cols}x{rows}:padding=4:color=0x07080b",
                     "-frames:v",
                     "1",
                     str(target),
